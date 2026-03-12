@@ -127,6 +127,23 @@
             transition: opacity 0.3s;
         }
 
+        .collision-indicator {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #e84545;
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-weight: bold;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .collision-indicator.show {
+            opacity: 1;
+        }
+
         .snapped-indicator.show {
             opacity: 1;
         }
@@ -165,12 +182,14 @@
     </div>
 
     <div class="snapped-indicator" id="snappedIndicator">✨ 吸附成功！</div>
+    <div class="collision-indicator" id="collisionIndicator">⚠️ 无法重叠放置！</div>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const piecesContainer = document.getElementById('piecesContainer');
         const snappedIndicator = document.getElementById('snappedIndicator');
+        const collisionIndicator = document.getElementById('collisionIndicator');
 
         let pieces = [];
         let selectedPiece = null;
@@ -372,6 +391,50 @@
             }, 1000);
         }
 
+        function showCollisionIndicator() {
+            collisionIndicator.classList.add('show');
+            setTimeout(() => {
+                collisionIndicator.classList.remove('show');
+            }, 1000);
+        }
+
+        function doPolygonsIntersect(a, b) {
+            const polygons = [a, b];
+            for (let i = 0; i < polygons.length; i++) {
+                const polygon = polygons[i];
+                for (let j = 0; j < polygon.length; j++) {
+                    const k = (j + 1) % polygon.length;
+                    const normal = { x: -(polygon[k].y - polygon[j].y), y: polygon[k].x - polygon[j].x };
+                    let minA = Infinity, maxA = -Infinity;
+                    for (const p of a) {
+                        const projected = normal.x * p.x + normal.y * p.y;
+                        minA = Math.min(minA, projected);
+                        maxA = Math.max(maxA, projected);
+                    }
+                    let minB = Infinity, maxB = -Infinity;
+                    for (const p of b) {
+                        const projected = normal.x * p.x + normal.y * p.y;
+                        minB = Math.min(minB, projected);
+                        maxB = Math.max(maxB, projected);
+                    }
+                    if (maxA < minB || maxB < minA) return false;
+                }
+            }
+            return true;
+        }
+
+        function checkCollision(piece, excludePiece = null) {
+            const points = getTransformedPoints(piece);
+            for (const other of pieces) {
+                if (other === piece || other === excludePiece) continue;
+                const otherPoints = getTransformedPoints(other);
+                if (doPolygonsIntersect(points, otherPoints)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         canvas.addEventListener('mousedown', (e) => {
             const rect = canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
@@ -380,6 +443,8 @@
             for (let i = pieces.length - 1; i >= 0; i--) {
                 if (isPointInPiece(x, y, pieces[i])) {
                     selectedPiece = pieces[i];
+                    selectedPiece.prevX = selectedPiece.x;
+                    selectedPiece.prevY = selectedPiece.y;
                     isDragging = true;
                     offsetX = x - selectedPiece.x;
                     offsetY = y - selectedPiece.y;
@@ -404,8 +469,14 @@
         });
 
         canvas.addEventListener('mouseup', () => {
-            if (isDragging) {
-                snapPieces();
+            if (isDragging && selectedPiece) {
+                if (checkCollision(selectedPiece)) {
+                    selectedPiece.x = selectedPiece.prevX;
+                    selectedPiece.y = selectedPiece.prevY;
+                    showCollisionIndicator();
+                } else {
+                    snapPieces();
+                }
                 render();
             }
             isDragging = false;
@@ -418,8 +489,14 @@
             
             for (let i = pieces.length - 1; i >= 0; i--) {
                 if (isPointInPiece(x, y, pieces[i])) {
+                    const oldRotation = pieces[i].rotation;
                     pieces[i].rotation = (pieces[i].rotation + ROTATION_STEP) % 360;
-                    snapPieces();
+                    if (checkCollision(pieces[i])) {
+                        pieces[i].rotation = oldRotation;
+                        showCollisionIndicator();
+                    } else {
+                        snapPieces();
+                    }
                     render();
                     return;
                 }
@@ -446,6 +523,11 @@
                 centerX: center.x,
                 centerY: center.y
             };
+            
+            if (checkCollision(newPiece)) {
+                showCollisionIndicator();
+                return;
+            }
             
             pieces.push(newPiece);
             selectedPiece = newPiece;
